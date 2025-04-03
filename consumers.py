@@ -1,8 +1,17 @@
-from kafka import KafkaConsumer
+import sys
+import random
 import json
 import mysql.connector
+from kafka import KafkaConsumer
 
-# Fetch channel IDs from MySQL database
+# Get viewer name from command line
+if len(sys.argv) < 2:
+    print("[❌ ERROR] No viewer name provided. Exiting...")
+    sys.exit(1)
+
+viewer_name = sys.argv[1]  # Get viewer name from script argument
+
+# Fetch channels from MySQL
 def fetch_channel_ids():
     try:
         connection = mysql.connector.connect(
@@ -11,43 +20,36 @@ def fetch_channel_ids():
             user="root",
             password="iamatulletmein"
         )
-        
-        if connection.is_connected():
-            print("[✅ DEBUG] Database connection successful!")  # Debug success message
-        
         cursor = connection.cursor()
-        cursor.execute("SELECT channel_id FROM channels;")  # Fetch only channel IDs
-        channel_ids = [str(row[0]) for row in cursor.fetchall()]  # Convert to string for Kafka topics
+        cursor.execute("SELECT channel_id FROM channels;")
+        channel_ids = [str(row[0]) for row in cursor.fetchall()]
         
         cursor.close()
         connection.close()
         return channel_ids
-    
     except mysql.connector.Error as e:
         print(f"[❌ ERROR] MySQL Connection Failed: {e}")
-        return []  # Return empty list if DB fails
+        return []
 
-# Fetch channel IDs (topics) from MySQL
-topics = fetch_channel_ids()
+# Fetch all channels
+all_channels = fetch_channel_ids()
 
-# Ensure we have topics to subscribe to
-if not topics:
-    print("[⚠️ WARNING] No channel IDs found in database. Exiting...")
-    exit()
+# Randomly assign 3 channels to this viewer
+subscribed_channels = random.sample(all_channels, 3) if len(all_channels) >= 3 else all_channels
 
-# Create Kafka Consumer and subscribe to all retrieved topics (channel IDs)
+# Create Kafka Consumer
 consumer = KafkaConsumer(
-    *topics,  # Subscribe to all channel IDs as topics
+    *subscribed_channels,
     bootstrap_servers='localhost:9092',
-    auto_offset_reset='latest',  # Start from the earliest message
+    auto_offset_reset='latest',
     enable_auto_commit=True,
-    value_deserializer=lambda x: json.loads(x.decode('utf-8'))  # Deserialize JSON messages
+    value_deserializer=lambda x: json.loads(x.decode('utf-8'))
 )
 
-print(f"[✅ SUCCESS] Subscribed to {len(topics)} channels: {topics}")
+print(f"[👤 {viewer_name}] Subscribed to channels: {subscribed_channels}")
+print(f"[📡 LISTENING] {viewer_name} is waiting for messages...\n")
 
 # Listening for messages
-print("[📡 LISTENING] Waiting for messages...\n")
 for message in consumer:
-    print(f"[📩 RECEIVED] Channel ID: {message.topic} | Message: {message.value}")
+    print(f"[📩 RECEIVED] Viewer: {viewer_name} | Channel ID: {message.topic} | Message: {message.value}")
 

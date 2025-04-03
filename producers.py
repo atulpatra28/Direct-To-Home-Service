@@ -19,7 +19,7 @@ def fetch_channels():
             print("[✅ DEBUG] Database connection successful!")  # Debug success message
         
         cursor = connection.cursor()
-        cursor.execute("SELECT channel_id, channel_name FROM channels;")  # Fetch channel_id
+        cursor.execute("SELECT channel_id, channel_name FROM channels;")  # Fetch channel_id and channel_name
         channels = {row[0]: row[1] for row in cursor.fetchall()}  # Store as {channel_id: channel_name}
         
         cursor.close()
@@ -37,10 +37,13 @@ def create_producers():
 
     for channel_id, channel_name in channels.items():
         try:
-            producers[channel_id] = KafkaProducer(
-                bootstrap_servers='localhost:9092',
-                value_serializer=lambda v: json.dumps(v).encode('utf-8')
-            )
+            producers[channel_id] = {
+                "producer": KafkaProducer(
+                    bootstrap_servers='localhost:9092',
+                    value_serializer=lambda v: json.dumps(v).encode('utf-8')
+                ),
+                "channel_name": channel_name  # Store channel_name with producer
+            }
             print(f"[✅ SUCCESS] Kafka Producer initialized for '{channel_name}' (Topic ID: {channel_id})")
         except Exception as e:
             print(f"[❌ ERROR] Kafka Producer Failed for '{channel_name}' (Topic ID: {channel_id}): {e}")
@@ -54,14 +57,16 @@ producers = create_producers()
 def shutdown_handler(signal_received, frame):
     print("\n[⚠️ SHUTDOWN] Termination signal received. Flushing and closing producers...")
 
-    for channel_id, producer in producers.items():
+    for channel_id, producer_data in producers.items():
+        producer = producer_data["producer"]
+        channel_name = producer_data["channel_name"]
         try:
-            print(f"[🔄 FLUSH] Flushing messages for topic '{channel_id}'...")
+            print(f"[🔄 FLUSH] Flushing messages for '{channel_name}' (Topic ID: {channel_id})...")
             producer.flush()  # Ensure all buffered messages are sent
             producer.close()  # Close the producer cleanly
-            print(f"[✅ CLOSED] Producer for topic '{channel_id}' closed.")
+            print(f"[✅ CLOSED] Producer for '{channel_name}' closed.")
         except Exception as e:
-            print(f"[❌ ERROR] Failed to close producer for '{channel_id}': {e}")
+            print(f"[❌ ERROR] Failed to close producer for '{channel_name}': {e}")
 
     print("[🚀 EXIT] All producers closed. Exiting program.")
     sys.exit(0)
@@ -73,13 +78,16 @@ signal.signal(signal.SIGTERM, shutdown_handler)
 # Sending messages continuously
 try:
     while True:
-        for channel_id, producer in producers.items():
-            message = {"event": "welcome_message", "data": f"Welcome to Channel {channel_id}!"}
+        for channel_id, producer_data in producers.items():
+            producer = producer_data["producer"]
+            channel_name = producer_data["channel_name"]  # Fetch channel name
+
+            message = {"event": "welcome_message", "data": f"Welcome to {channel_name}!"}
             try:
                 print(f"[DEBUG] Sending message to topic '{channel_id}'...")
                 future = producer.send(str(channel_id), value=message)  # Topic is channel_id (string)
                 result = future.get(timeout=10)  # Ensures message is sent before moving forward
-                print(f"[📩 SUCCESS] Message sent to '{channel_id}', partition: {result.partition}, offset: {result.offset}")
+                print(f"[📩 SUCCESS] Message sent from {channel_name} to topic '{channel_id}', partition: {result.partition}, offset: {result.offset}")
             except Exception as e:
                 print(f"[❌ ERROR] Failed to send message to '{channel_id}': {e}")
         

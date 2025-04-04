@@ -3,7 +3,7 @@ import random
 import json
 import time
 import mysql.connector
-from datetime import datetime
+from datetime import datetime, timedelta
 from kafka import KafkaConsumer
 
 # Get viewer name from command line
@@ -36,11 +36,6 @@ def get_user_id(name):
         print(f"[❌ ERROR] Failed to fetch user_id: {e}")
         return None
 
-user_id = get_user_id(viewer_name)
-if user_id is None:
-    print(f"[❌ ERROR] Viewer '{viewer_name}' not found in database.")
-    sys.exit(1)
-
 # Fetch available channel IDs
 def fetch_channel_ids():
     try:
@@ -69,18 +64,54 @@ def insert_watch_log(user_id, channel_id, start_time, stop_time):
         cursor.close()
         conn.close()
 
-        # Duration calculation (only for debugging)
         duration = int((stop_time - start_time).total_seconds())
         print(f"[✅ INFO] Watch log added | Duration: {duration} seconds")
         
     except mysql.connector.Error as e:
         print(f"[❌ ERROR] Failed to insert watch log: {e}")
 
-# Initialization
+# Insert billing record for a user
+def insert_billing_record(user_id, subscribed_channel_ids):
+    try:
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+
+        # Calculate total amount for subscribed channels
+        format_strings = ','.join(['%s'] * len(subscribed_channel_ids))
+        query = f"SELECT SUM(price_per_month) FROM channels WHERE channel_id IN ({format_strings})"
+        cursor.execute(query, tuple(subscribed_channel_ids))
+        total_amount = cursor.fetchone()[0]
+
+        # Billing and due dates
+        billing_date = datetime.now()
+        due_date = billing_date + timedelta(days=10)
+
+        # Insert into billing table
+        cursor.execute("""
+            INSERT INTO billing (user_id, amount, billing_date, due_date)
+            VALUES (%s, %s, %s, %s)
+        """, (user_id, total_amount, billing_date.strftime('%Y-%m-%d %H:%M:%S'),
+              due_date.strftime('%Y-%m-%d %H:%M:%S')))
+        conn.commit()
+        print(f"[💰 BILLING] Billing record inserted for User {user_id} | Amount: {total_amount}")
+        cursor.close()
+        conn.close()
+
+    except mysql.connector.Error as e:
+        print(f"[❌ ERROR] Failed to insert billing record: {e}")
+
+# ---- MAIN LOGIC ----
+user_id = get_user_id(viewer_name)
+if user_id is None:
+    print(f"[❌ ERROR] Viewer '{viewer_name}' not found in database.")
+    sys.exit(1)
+
 all_channels = fetch_channel_ids()
 subscribed_channels = random.sample(all_channels, 3) if len(all_channels) >= 3 else all_channels
-
 print(f"[👤 {viewer_name}] Subscribed to channels: {subscribed_channels}")
+
+# Insert billing record for this user for one month
+insert_billing_record(user_id, subscribed_channels)
 
 current_channel = random.choice(subscribed_channels)
 switch_time = time.time() + random.randint(30, 120)

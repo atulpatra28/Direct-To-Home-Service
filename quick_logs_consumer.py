@@ -114,7 +114,7 @@ print(f"[👤 {viewer_name}] Subscribed to channels: {subscribed_channels}")
 insert_billing_record(user_id, subscribed_channels)
 
 current_channel = random.choice(subscribed_channels)
-switch_time = time.time() + random.randint(30, 120)
+switch_time = time.time() + random.randint(4, 10)  # ✅ 1–4 seconds switch time
 current_time = datetime.now()
 print(f"[📡 {viewer_name}] {current_time.strftime('%Y-%m-%d %H:%M:%S')} | Now watching channel {current_channel}...\n")
 
@@ -151,14 +151,13 @@ while True:
         consumer.unsubscribe()
         consumer.subscribe([new_channel])
 
-        # ✅ Give Kafka time to assign partitions
-        time.sleep(1)
+        # Give Kafka time to assign partitions
+        time.sleep(0.5)
 
-        # ✅ Log subscription status
         print(f"[📡 INFO] Subscribed to: {consumer.subscription()}")
 
         current_channel = new_channel
-        switch_time = time.time() + random.randint(30, 120)
+        switch_time = time.time() + random.randint(1, 4)  # ✅ keep fast switching
 
         watch_start_time = None
         watch_stop_time = None
@@ -176,5 +175,4 @@ while True:
                 watch_start_time = now
                 watch_stop_time = datetime.fromtimestamp(switch_time)
                 first_message_received = True
-
 
